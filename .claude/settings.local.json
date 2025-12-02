@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "RepoPrompt"
+  ],
+  "enableAllProjectMcpServers": true
+}
