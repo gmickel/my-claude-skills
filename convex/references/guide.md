@@ -407,6 +407,11 @@ Rules:
 * **Never** call `ctx.db` inside actions.
 
   * Use `ctx.runQuery`, `ctx.runMutation`, `ctx.runAction`.
+* **No dynamic imports in queries/mutations** - only actions support `await import()`.
+
+  * Bad: `const { foo } = await import('./module');` inside a query/mutation
+  * Good: `import { foo } from './module';` at top of file
+  * Actions can use dynamic imports because they run in Node.js environment
 * Use actions for:
 
   * Calling external APIs (OpenAI, Resend, etc.).
@@ -792,6 +797,53 @@ Components are NPM packages that bundle tables + functions in a sandbox. You:
 2. Add to `convex/convex.config.ts` with `app.use(...)`.
 3. Expose API through your own `convex/*.ts` file.
 4. Use the generated functions via `components.<name>...` references from `./_generated/api`.
+
+### 14.0. CRITICAL: Querying Component Tables
+
+**Component tables are NOT in your main database namespace.** You cannot use `ctx.db.query('componentTable')`.
+
+**WRONG:**
+```ts
+// This will fail with "Index not found" error!
+const user = await (ctx.db as any)
+  .query('user')
+  .withIndex('email', (q) => q.eq('email', email))
+  .first();
+```
+
+**CORRECT:**
+```ts
+import { components } from './_generated/api';
+
+// Inside a mutation or action (which have ctx.runQuery):
+const user = await ctx.runQuery(
+  components.betterAuth.adapter.findOne,
+  {
+    model: 'user',
+    where: [{ field: 'email', operator: 'eq', value: email }],
+  }
+);
+
+// For getting by ID:
+const org = await ctx.runQuery(
+  components.betterAuth.adapter.findOne,
+  {
+    model: 'organization',
+    where: [{ field: '_id', operator: 'eq', value: orgId }],
+  }
+);
+
+// For membership queries (Better Auth specific):
+const memberships = await ctx.runQuery(
+  components.betterAuth.membership.listByUserId,
+  { userId: userId }
+);
+```
+
+**Key points:**
+- `ctx.runQuery` is only available in mutations and actions, NOT in queries
+- For code that needs to run in both contexts, create an internalMutation wrapper
+- Component adapter functions vary by component - check the component's API
 
 ### 14.1. Presence component (`@convex-dev/presence`)
 
@@ -1360,5 +1412,16 @@ When your agent is about to emit Convex code, mentally run through this list:
 
    * [ ] Instructed user to set env vars for keys instead of hardcoding?
    * [ ] Using `process.env` for secrets?
+
+9. **Dynamic Imports**
+
+   * [ ] No `await import()` in queries or mutations? (Only actions support dynamic imports)
+   * [ ] Using static imports at top of file for all query/mutation dependencies?
+
+10. **Convex Components (e.g., Better Auth)**
+
+    * [ ] Not using `ctx.db.query('componentTable')` to query component tables?
+    * [ ] Using `ctx.runQuery(components.<name>.adapter.findOne, {...})` for component table lookups?
+    * [ ] Component table queries only from mutations/actions (which have `runQuery`)?
 
 If you keep these rules in your "Convex mental model", you'll produce way fewer broken Convex apps and your users will be much happier.
